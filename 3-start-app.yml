@@ -1,0 +1,47 @@
+- hosts: all
+  vars:
+    db_password: !vault |
+          $ANSIBLE_VAULT;1.1;AES256
+          39396166306438373864616463636262396264663062393733336335386164346461366433663430
+          3231623331356161646162666230303939376637626633390a616162333430653964316436343061
+          65306532333566623561633939326636366438373263366162383038633831396564633334396161
+          3839643766663233630a323164376436366338316565316365323031383638343136383765656461
+          3663
+  become: true
+  become_method: sudo
+  become_user: root
+  tasks:
+
+  - name: run compose task
+    community.docker.docker_compose:
+      project_name: servian
+      definition:
+        version: '3'
+        services:
+          postgres:
+            image: postgres:latest
+            restart: always
+            container_name: postgres
+            expose:
+              - 5432
+            environment:
+              - POSTGRES_PASSWORD={{db_password}}
+            healthcheck:
+              test: "pg_isready -h localhost -p 5432"
+              interval: 2s
+              timeout: 2s
+              retries: 3
+
+          servian:
+            image: servian/techchallengeapp:latest
+            restart: always
+            container_name: servian
+            ports:
+              - 3000:3000
+            depends_on:
+              postgres:
+                condition: service_healthy
+            environment:
+              - VTT_DBHOST=postgres
+              - VTT_LISTENHOST=0.0.0.0
+            command: serve

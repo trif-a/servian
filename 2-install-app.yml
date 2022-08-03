@@ -1,0 +1,82 @@
+- hosts: all
+  vars:
+    db_password: !vault |
+          $ANSIBLE_VAULT;1.1;AES256
+          39396166306438373864616463636262396264663062393733336335386164346461366433663430
+          3231623331356161646162666230303939376637626633390a616162333430653964316436343061
+          65306532333566623561633939326636366438373263366162383038633831396564633334396161
+          3839643766663233630a323164376436366338316565316365323031383638343136383765656461
+          3663
+  become: true
+  become_method: sudo
+  become_user: root
+  module_defaults:
+    apt:
+      force_apt_get: yes
+  tasks:
+
+  - name: install system dependencies
+    apt:
+      name: ['apt-transport-https', 'ca-certificates', 'curl', 'gnupg2', 'software-properties-common', 'python3-pip', 'python-setuptools']
+      update_cache: yes
+
+  - name: update pip
+    pip:
+      name: pip
+      extra_args: --upgrade
+
+  - name: install python dependencies
+    pip:
+      name: ['docker', 'setuptools-rust', 'docker-compose']
+
+  - name: add gpg key
+    apt_key:
+      url: https://download.docker.com/linux/ubuntu/gpg
+
+  - name: add docker repo
+    apt_repository:
+      repo: deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ansible_distribution_release}} stable
+
+  - name: install docker & compose
+    apt:
+      name: ['docker-ce', 'docker-ce-cli', 'containerd.io', 'docker-compose']
+      update_cache: yes
+
+  - name: update compose
+    shell: |
+      ver=$(curl -s https://api.github.com/repos/docker/compose/releases/latest | grep 'tag_name' | cut -d'"' -f4)
+      curl -L "https://github.com/docker/compose/releases/download/$ver/docker-compose-$(uname -s)-$(uname -m)" -o /usr/bin/docker-compose
+
+  - name: update compose permissions
+    file:
+      path: /usr/bin/docker-compose
+      mode: +x
+
+  - name: run compose task
+    community.docker.docker_compose:
+      project_name: servian
+      definition:
+        version: '3'
+        services:
+          postgres:
+            image: postgres:latest
+            container_name: postgres
+            expose:
+              - 5432
+            environment:
+              - POSTGRES_PASSWORD={{db_password}}
+            healthcheck:
+              test: "pg_isready -h localhost -p 5432"
+              interval: 2s
+              timeout: 2s
+              retries: 3
+
+          servian:
+            image: servian/techchallengeapp:latest
+            container_name: servian
+            depends_on:
+              postgres:
+                condition: service_healthy
+            environment:
+              - VTT_DBHOST=postgres
+            command: updatedb
